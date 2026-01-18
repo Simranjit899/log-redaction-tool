@@ -6,6 +6,17 @@ from pathlib import Path
 # --- Detection patterns (v1) ---
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# Authorization header redaction (Bearer / Basic)
+AUTH_HEADER_RE = re.compile(r"(?i)\bAuthorization\s*:\s*(Bearer|Basic)\s+([^\s]+)")
+
+# Generic key/value secret fields (api_key=..., token:..., secret=...)
+SECRET_FIELD_RE = re.compile(
+    r"(?i)\b(api[_-]?key|token|access[_-]?token|refresh[_-]?token|secret|client[_-]?secret)\b\s*([=:])\s*([^\s,;]+)"
+)
+
+# Some well-known token prefixes (high confidence)
+GITHUB_TOKEN_RE = re.compile(r"\b(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")
+SLACK_TOKEN_RE = re.compile(r"\b(xox[baprs]-[A-Za-z0-9-]{10,})\b")
 
 # Matches common "password-like" fields in logs: password=..., pwd: ..., pass: ...
 # Captures the key separately so we can keep it and only redact the value.
@@ -25,6 +36,23 @@ def redact_text(text: str) -> str:
         return f"{key}{sep}[REDACTED_PASSWORD]"
 
     text = PASSWORD_FIELD_RE.sub(_pw_sub, text)
+        # Redact Authorization headers
+    def _auth_sub(m: re.Match) -> str:
+        scheme = m.group(1)
+        return f"Authorization: {scheme} [REDACTED_AUTH_TOKEN]"
+    text = AUTH_HEADER_RE.sub(_auth_sub, text)
+
+    # Redact generic secret fields while keeping the key and separator
+    def _secret_sub(m: re.Match) -> str:
+        key = m.group(1)
+        sep = m.group(2)
+        return f"{key}{sep}[REDACTED_SECRET]"
+    text = SECRET_FIELD_RE.sub(_secret_sub, text)
+
+    # Redact known token formats
+    text = GITHUB_TOKEN_RE.sub("[REDACTED_GITHUB_TOKEN]", text)
+    text = SLACK_TOKEN_RE.sub("[REDACTED_SLACK_TOKEN]", text)
+
 
     # Redact emails and IPs
     text = EMAIL_RE.sub("[REDACTED_EMAIL]", text)
